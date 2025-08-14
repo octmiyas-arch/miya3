@@ -1,10 +1,10 @@
-
 {
-    "name": "Test Web App",
-    "short_name": "TestApp",
-    "start_url": ".",
-    "display": "standalone",
-    "background_color": "#000000",
-    "description": "A sample manifest file",
-    "icons": []
+  "name": "Krueger AI",
+  "short_name": "Krueger",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "icons": []
 }

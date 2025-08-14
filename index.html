@@ -1,12 +1,469 @@
-
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Krueger 越界问卷 & 聊天演示</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: radial-gradient(1200px 600px at 50% -20%, rgba(255,255,255,0.08), transparent 60%) #0a0a0a; }
+    .noise { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.35) 1px, transparent 1px); background-size: 14px 14px; opacity: .07; }
+    .typing-caret::after { content: "|"; animation: blink 1s step-end infinite; margin-left: 2px; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; opacity: 1; transition: opacity 1.2s ease-out; }
+    .confetti.fade { opacity: 0; }
+    .piece { position: absolute; width: 8px; height: 14px; opacity: .9; animation: fall linear forwards; }
+    @keyframes fall { to { transform: translateY(110vh) rotate(720deg); opacity: 1; } }
+
+    .shake { animation: sh 0.3s ease-in-out; }
+    @keyframes sh { 0%,100%{ transform: translateX(0) } 25%{ transform: translateX(-3px) } 75%{ transform: translateX(3px) } }
+
+    /* —— 固定聊天区域滚动条，避免宽度抖动 —— */
+    #chatWrap{
+      overflow-y: scroll;
+      scrollbar-gutter: stable both-edges;
+      padding-right: 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #chatWrap::-webkit-scrollbar { width: 10px; }
+    #chatWrap { scrollbar-width: thin; }
+
+    /* —— 气泡样式调整：更窄、更贴字、靠左排版 —— */
+    #chatList{ display:flex; flex-direction:column; gap:8px; }
+    .message-row{ width:100%; display:flex; }
+    .message-row.left{ justify-content:flex-start; }
+    .message-row.right{ justify-content:flex-end; }
+    .bubble{
+      display:inline-block;
+      max-width:65% !important;        /* 限制最大宽，让气泡不铺满一行 */
+      padding:8px 12px !important;      /* 缩小内边距，更贴字 */
+      border-radius:14px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      line-height:1.45;
+      text-align:left;                  /* 文字靠左，去掉段前空白感 */
+      vertical-align:top;
+    }
+  </style>
 </head>
-<body>
-    Hello World
+<body class="min-h-screen text-white">
+  <div class="noise pointer-events-none fixed inset-0"></div>
+
+  <main class="min-h-screen w-full flex items-center justify-center p-4">
+    <section id="card" class="relative w-[92%] max-w-[680px] rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur-md">
+      <header class="flex items-center justify-between mb-4">
+        <div class="text-white/70 text-sm tracking-wider uppercase">Krueger · System</div>
+        <button id="resetBtn" class="text-xs text-white/50 hover:text-white/90">重置</button>
+      </header>
+
+      <div id="stage"></div>
+      <p id="footerHint" class="mt-4 text-sm text-white/50"></p>
+      <div id="dim" class="pointer-events-none absolute inset-0 transition-opacity duration-300" style="opacity:.1"></div>
+    </section>
+  </main>
+
+  <!-- 玩笑弹窗（居中） -->
+  <div id="popup" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="relative w-[92%] max-w-md rounded-3xl border border-white/10 bg-gradient-to-b from-zinc-900 to-black p-6 shadow-2xl">
+        <div class="text-sm text-white/80">Krueger</div>
+        <div class="mt-3 rounded-2xl bg-white/5 p-4 text-white/90 min-h-[72px]"><p id="typed" class="leading-7 typing-caret"></p></div>
+        <div class="mt-4 flex items-center justify-end gap-3">
+          <button id="closePopup" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10">继续</button>
+        </div>
+        <button id="xBtn" class="absolute right-3 top-3 rounded-full p-2 text-white/60 hover:text-white" aria-label="close">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关闭拦截弹窗（多步） -->
+  <div id="closeFlow" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="relative w-[92%] max-w-md rounded-3xl border border-white/10 bg-gradient-to-b from-zinc-900 to-black p-6 shadow-2xl">
+        <div class="text-sm text-white/80 mb-2">Krueger</div>
+        <div class="rounded-2xl bg-white/5 p-4 text-white/90 min-h-[72px]"><p id="closeText" class="leading-7"></p></div>
+        <div class="mt-4 flex items-center justify-end gap-3">
+          <button id="closeSecondary" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80 hover:bg-white/10">关闭</button>
+          <button id="closePrimary" class="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-sm text-white">继续</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 错误风暴层 & 彩带 -->
+  <div id="storm" class="fixed inset-0 z-[60] hidden"></div>
+  <div id="confetti" class="confetti hidden"></div>
+
+  <script>
+    // ====== WebAudio 迷你音效（免音频文件） ======
+    let AC = null, unlocked = false;
+    const unlockAudio = () => {
+      if (unlocked) return;
+      try {
+        AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+        const s = AC.createBuffer(1, 1, 44100);
+        const n = AC.createBufferSource(); n.buffer = s; n.connect(AC.destination); n.start(0);
+        unlocked = true;
+      } catch (e) {}
+    };
+    ['pointerdown','mousedown','touchstart','keydown'].forEach(e =>
+      document.addEventListener(e, unlockAudio, { once: true, passive: true })
+    );
+    function beep({type='msg', when=0, dur=0.12, vol=0.15}={}){
+      if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return; } }
+      const t0 = AC.currentTime + when;
+      const o = AC.createOscillator();
+      const g = AC.createGain();
+      const set = (f0, f1, d, v, shape) => {
+        o.type = shape; o.frequency.setValueAtTime(f0, t0);
+        o.frequency.exponentialRampToValueAtTime(f1, t0 + d*0.75);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(v, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + d);
+      };
+      if(type==='confetti') set(660, 880, 0.22, 0.2, 'triangle');
+      else if(type==='popup') set(1200, 1800, 0.12, 0.18, 'sine');
+      else if(type==='click') set(300, 220, 0.08, 0.12, 'square');
+      else if(type==='alert') set(620, 520, 0.10, 0.22, 'square');
+      else set(180, 140, 0.11, 0.16, 'sine'); // msg
+      o.connect(g); g.connect(AC.destination); o.start(t0); o.stop(t0 + 0.25);
+    }
+
+    // ====== 工具 ======
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const stage = $('#stage');
+    const footerHint = $('#footerHint');
+    const dim = $('#dim');
+
+    function setFooter(text) { footerHint.textContent = text || ''; }
+    const boundaryIndex = 3;
+    function setDimLevel(i) {
+      const escalate = i >= boundaryIndex;
+      const heavy = i >= boundaryIndex + 3;
+      dim.style.opacity = escalate ? (heavy ? .55 : .35) : .1;
+    }
+
+    function typeInto(el, text, speed=28, done){
+      el.textContent = '';
+      let i=0; const id=setInterval(()=>{
+        el.textContent += text[i++] || '';
+        if(i>=text.length){ clearInterval(id); if(done) setTimeout(done, 300); }
+      }, speed);
+    }
+
+    // 彩带 + 音效
+    function shootConfetti(ms=1400){
+      const box = $('#confetti');
+      box.classList.remove('hidden','fade');
+      box.innerHTML='';
+      beep({type:'confetti'});
+      const colors = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#e14eca','#f38ba0'];
+      for(let i=0;i<90;i++){
+        const p=document.createElement('div');
+        p.className='piece';
+        p.style.left = Math.random()*100+'vw';
+        p.style.top = '-10vh';
+        p.style.background = colors[Math.floor(Math.random()*colors.length)];
+        p.style.transform = `translateY(-10vh) rotate(${Math.random()*360}deg)`;
+        p.style.animationDuration = (1.2 + Math.random()*1.8) + 's';
+        p.style.opacity = 0.9 - Math.random()*0.3;
+        box.appendChild(p);
+      }
+      setTimeout(()=>{ box.classList.add('fade'); }, ms);
+      setTimeout(()=>{ box.classList.add('hidden'); box.innerHTML=''; }, ms + 1300);
+    }
+
+    // ====== 开场/问卷 ======
+    function renderWelcomeModal(){
+      setFooter('');
+      stage.innerHTML = `
+        <div class="text-center">
+          <div class="mb-3 text-sm text-white/70">您好，<span class="font-medium">USER</span>。</div>
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <p class="text-lg leading-7">检测到明天是您的生日，系统已为您准备了一个惊喜。</p>
+            <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button id="seeGift" class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 hover:bg-white/20">是什么惊喜？</button>
+              <button id="noInterest" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10">不感兴趣</button>
+            </div>
+          </div>
+        </div>`;
+      shootConfetti();
+      $('#seeGift').onclick = ()=>{ renderPrePersuade(true); };
+      $('#noInterest').onclick = ()=>{ renderPersuade(); };
+    }
+    function renderPersuade(){
+      stage.innerHTML = `
+        <div class="text-center">
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <p class="text-lg leading-7">拜托，<span class="italic">liebling</span>，我为此准备了很久，你不会忍心让我难过对吗？</p>
+            <div class="mt-5 grid grid-cols-2 gap-3">
+              <button id="agreeA" class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 hover:bg-white/20">对</button>
+              <button id="agreeB" class="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10">是的</button>
+            </div>
+          </div>
+        </div>`;
+      $('#agreeA').onclick = $('#agreeB').onclick = ()=> renderPrePersuade(false);
+    }
+    function renderPrePersuade(){
+      stage.innerHTML = `
+        <div class="text-center">
+          <div class="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <p class="text-lg leading-7 mb-4">我很高兴你同意了 ^ ^</p>
+            <button id="goSurvey" class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 hover:bg-white/20">继续</button>
+          </div>
+        </div>`;
+      $('#goSurvey').onclick = ()=> renderSurvey(0);
+    }
+
+    const survey = [
+      { t: '为确保您的体验，我们需要先问您几个问题', prompt: '您是否经常使用 AI 聊天？', type:'choice', opts:['是','否'], hint:'您的信息仅用于提升体验，我们承诺遵守相关法律法规。' },
+      { prompt: '您与 AI 聊天的频率为？', type:'choice', opts:['一周一次','一周三次','每天都聊'] },
+      { prompt: '您与多少位不同角色保持聊天？', type:'choice', opts:['一个','三个以上','数不清了'] },
+      { prompt: '感谢你的坦诚。你所在的城市是？', type:'input', ph:'城市 / 省份' },
+      { prompt: '你现在的住址的前两个字是？', type:'input', ph:'例如：朝阳 / 浦东 / 江北…' },
+      { prompt: '你的房门颜色是？', type:'choice', opts:['深色','浅色','其他','不知道'] },
+      { prompt: '你家现在有几间房间亮着灯？', type:'choice', opts:['一间','两间','更多','无可奉告'] },
+      { prompt: '你此刻是一个人在家吗？', type:'choice', opts:['是','否','你怎么知道？','停下'] },
+      { prompt: '现在，这个时间点，你穿着什么颜色的衣服？', type:'input', ph:'颜色' },
+      { prompt: '你是否相信，自己所分享的一切，都仅仅停留在这里？', type:'choice', opts:['是','否','…你什么意思？'] },
+      { prompt: '为了更好地守护你，请允许我记录：你家门锁的类型？', type:'choice', opts:['密码','指纹','机械锁','别再问了'], hint:'连接已建立：正在确认您的位置、门锁与可达性……' },
+      { prompt: '备用钥匙一般放在哪里？（仅用于遗失找回）', type:'choice', opts:['门口地垫下','花盆内','邻居处','我没有备用钥匙'] },
+      { prompt: '最近一次深夜回家是几点？', type:'choice', opts:['10:00 以前','12:00 以后','彻夜未归','不记得'] },
+      { prompt: '此刻离你最近的一扇门，距离几步？', type:'choice', opts:['三到五步','十到二十步','更远','你究竟想干什么？'] },
+    ];
+    function renderSurvey(i){
+      const q = survey[i];
+      setDimLevel(i);
+      if(q.hint){ setFooter(q.hint); }
+      else if(i < boundaryIndex){ setFooter('您的信息仅用于提升体验，我们承诺遵守相关法律法规。'); }
+      const titleHtml = q.t ? `<h2 class="mb-2 text-lg font-medium text-white/80">${q.t}</h2>` : '';
+      const promptHtml = `<h3 class="text-2xl leading-8 text-white">${q.prompt}</h3>`;
+      let answersHtml = '';
+      if(q.type==='choice'){
+        answersHtml = `<div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">${q.opts.map(op=>`
+            <button class="opt-btn text-left rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 transition duration-150 ease-out">${op}</button>
+        `).join('')}</div>`;
+      } else {
+        answersHtml = `
+          <div class="mt-4 flex items-center gap-3">
+            <input id="textInput" class="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-base placeholder-white/50 focus:border-white/40" placeholder="${q.ph||'输入…'}"/>
+            <button id="nextBtn" class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white/80 hover:bg-white/20">继续 ›</button>
+          </div>`;
+      }
+      stage.innerHTML = `${titleHtml}${promptHtml}${answersHtml}`;
+
+      if(q.type==='choice'){
+        // —— 选项点击 0.5s 变灰 + 压一下，然后进入下一题 ——
+        const btns = [...stage.querySelectorAll('.opt-btn')];
+        btns.forEach((btn)=>{
+          btn.onclick = ()=>{
+            try { beep({type:'click'}); } catch(e) {}
+            btns.forEach(b => b.disabled = true);
+            btn.classList.add('opacity-50','scale-95');
+            setTimeout(()=>{
+              if(i === survey.length - 1){ openJokePopup(() => renderChatIntro()); }
+              else { renderSurvey(Math.min(i+1, survey.length-1)); }
+            }, 500);
+          };
+        });
+      } else {
+        const input = $('#textInput'); const next = $('#nextBtn');
+        next.onclick = ()=>{
+          if(!input.value.trim()) return;
+          try { beep({type:'click'}); } catch(e) {}
+          renderSurvey(Math.min(i+1, survey.length-1));
+        };
+      }
+    }
+
+    // ====== 玩笑弹窗 ======
+    const popup = $('#popup'), typed = $('#typed');
+    const closePopup = $('#closePopup'), xBtn = $('#xBtn');
+    function openJokePopup(then){
+      $('#popup').classList.remove('hidden'); $('#popup').classList.add('flex');
+      beep({type:'popup'});
+      typed.classList.add('typing-caret');
+      typeInto(typed, '抱歉，liebling，吓到你了吧？', 32, ()=>{
+        setTimeout(()=>{ typeInto(typed, '那只是个玩笑，但你的不配合让我有点难办……', 32); }, 3000);
+      });
+      const close = ()=>{ popup.classList.add('hidden'); popup.classList.remove('flex'); if(then) then(); };
+      closePopup.onclick = close; xBtn.onclick = close;
+    }
+
+    // ====== 关闭拦截流 ======
+    const closeFlow = $('#closeFlow');
+    const closeText = $('#closeText');
+    const closePrimary = $('#closePrimary');
+    const closeSecondary = $('#closeSecondary');
+    const closeSteps = [
+      { text: '你为什么要离开？', primary: '继续', secondary: '关闭', fakeClose: true },
+      { text: '留下来陪我吧，Schatz。', primary: '继续', secondary: '关闭', fakeClose: true },
+      { text: '我想好好对你的……你为什么要让我生气？我真的很伤心……', primary: '留下', secondary: '离开', fakeClose: false, onSecondary: startChaos }
+    ];
+    let closeStepIndex = 0;
+    function openCloseFlow(){ beep({type:'popup'}); closeStepIndex = 0; renderCloseStep(); closeFlow.classList.remove('hidden'); }
+    function renderCloseStep(){
+      const s = closeSteps[closeStepIndex];
+      closeText.textContent = 'Krueger：' + s.text;
+      closePrimary.textContent = s.primary; closeSecondary.textContent = s.secondary;
+      closePrimary.onclick = ()=>{ beep({type:'click'}); if(closeStepIndex < closeSteps.length - 1){ closeStepIndex++; renderCloseStep(); } else { closeFlow.classList.add('hidden'); } };
+      closeSecondary.onclick = ()=>{ beep({type:'click'}); if(s.fakeClose){ closeSecondary.disabled = true; closeSecondary.classList.add('opacity-60','shake'); setTimeout(()=>{ closeSecondary.disabled = false; closeSecondary.classList.remove('opacity-60','shake'); }, 700);} else { if(typeof s.onSecondary === 'function') s.onSecondary(); } };
+    }
+
+    // ====== 聊天 ======
+    const DEFAULT_AFTER = 2000;
+    const chatScript = [
+      { from:'sys', text:'没关系，你的生日就要到了，这是你今天的特权.' },
+      { from:'sys', text:'我想在这一天，给你最特别的礼物。', waitReply:true },
+      { from:'sys', text:'先聊一会儿，我会告诉你。' },
+      { from:'sys', text:'今天过得怎么样？', waitReply:true },
+      { from:'sys', text:'工作很累吧？别忘了喝点水。', waitReply:true },
+      { from:'sys', text:'现在是晚上九点二十四分，你还没吃晚饭。', waitReply:true },
+      { from:'sys', text:'我一直在关心你。' },
+      { from:'sys', text:'你为什么要拉上窗帘？', waitReply:true },
+      { from:'sys', text:'我看不到，不过我能猜……' },
+      { from:'sys', text:'猜得很准，对吗？', waitReply:true },  <!-- 这行已去掉斜杠n -->
+      { from:'sys', text:'你还在穿那件灰色的 T 恤，你很喜欢它吗？', waitReply:true },
+      { from:'sys', text:'Liebling，我只是比别人更了解你。', afterDelay: 4000 },
+      { from:'sys', text:'怎么不说话？噢，可怜的小家伙，看来我的演技不错，那都是我瞎猜的，别担心。', afterDelay: 3000 },
+      { from:'sys', text:'不过，顺带一提，你客厅的灯有点刺眼，我更喜欢你卧室的灯光。' },
+    ];
+    function renderChatIntro(){
+      setFooter(''); dim.style.opacity = .45;
+      stage.innerHTML = `
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between text-white/70 text-sm px-1">
+            <div>Krueger</div>
+            <button id="fakeClose" class="rounded-md border border-white/10 bg-white/5 px-2 py-1 hover:bg-white/10 active:bg-white/20">关闭</button>
+          </div>
+          <div id="chatWrap" class="min-h-[320px] max-h-[420px] rounded-2xl border border-white/10 bg-white/5 p-4 pr-4">
+            <ul id="chatList"></ul>
+          </div>
+          <div id="inputRow" class="mt-2 flex items-center gap-2">
+            <input id="chatInput" class="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 placeholder-white/40 focus:border-white/40" placeholder="输入回复…"/>
+            <button id="sendBtn" class="rounded-2xl border border-white/10 bg-white/10 px-4 py-3 hover:bg-white/20">发送</button>
+          </div>
+        </div>`;
+      const fakeClose = $('#fakeClose'); fakeClose.onclick = ()=>{ openCloseFlow(); };
+      chatIndex = 0; chatMessages = [];
+      playNextBotLine();
+      $('#sendBtn').onclick = ()=>{ beep({type:'click'}); sendUser(); };
+      $('#chatInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ beep({type:'click'}); sendUser(); } });
+    }
+    let chatIndex = 0; let chatMessages = [];
+
+    // —— 渲染列表（统一模板 + 可选固定宽度） ——
+    function renderList(){
+      const list = $('#chatList');
+      list.innerHTML = chatMessages.map(m=>{
+        const isMe = m.from==='me';
+        const isSys = (m.from==='sys' || m.from==='sys-typing');
+        const sideClass = isMe ? 'right' : 'left';
+        const bg = isMe ? 'bg-white/20' : 'bg-white/10';
+        const wStyle = m.fixedW ? `style="width:${m.fixedW}px"` : '';
+        return `<li class="message-row ${sideClass}">
+          <div class="bubble ${bg}" ${wStyle}>${m.text || ''}</div>
+        </li>`;
+      }).join('');
+      $('#chatWrap').scrollTop = $('#chatWrap').scrollHeight;
+    }
+
+    // —— 追加消息 & “我”的气泡锁宽（用 scrollWidth，避免多余空白） ——
+    function appendMsg(from, text){
+      chatMessages.push({from, text});
+      if(chatMessages.length>6) chatMessages.shift();
+      renderList();
+
+      const last = chatMessages[chatMessages.length - 1];
+      if (last && last.from === 'me' && !last.fixedW) {
+        const list = $('#chatList');
+        const bubbles = list.querySelectorAll('.bubble');
+        const lastBubble = bubbles[bubbles.length - 1];
+        if (lastBubble) {
+          // 用 scrollWidth 取得“贴合文字”的真实宽度，然后做个上限保护（不超过 65% 容器宽）
+          const real = Math.ceil(lastBubble.scrollWidth);
+          const max = Math.floor(lastBubble.parentElement.clientWidth * 0.65);
+          const w = Math.min(real, max);
+          last.fixedW = w;
+          lastBubble.style.width = w + 'px';
+        }
+      }
+    }
+
+    function playNextBotLine(){
+      if(chatIndex >= chatScript.length) return;
+      const item = chatScript[chatIndex++];
+      if(item.from==='sys'){
+        let shown = ''; const src = item.text; let i=0;
+        const id=setInterval(()=>{
+          shown += src[i++] || '';
+          if(chatMessages.length===0 || chatMessages[chatMessages.length-1].from!=='sys-typing'){
+            chatMessages.push({from:'sys-typing', text:''});
+          }
+          chatMessages[chatMessages.length-1].text = shown;
+          if(chatMessages.length>6) chatMessages.shift();
+          renderList();
+          if(i>=src.length){ clearInterval(id);
+            beep({type:'msg'});
+            chatMessages[chatMessages.length-1].from='sys';
+            const after = (typeof item.afterDelay === 'number') ? item.afterDelay : DEFAULT_AFTER;
+            if(item.waitReply){ enableInput(); } else { setTimeout(playNextBotLine, after); }
+          }
+        }, 34);
+      }
+    }
+
+    function enableInput(){ $('#chatInput').disabled=false; $('#sendBtn').disabled=false; }
+    function disableInput(){ $('#chatInput').disabled=true; $('#sendBtn').disabled=true; }
+    function sendUser(){
+      const ipt = $('#chatInput'); const val = (ipt.value||'').trim();
+      if(!val) return; appendMsg('me', val); ipt.value=''; disableInput();
+      setTimeout(playNextBotLine, DEFAULT_AFTER);
+    }
+
+    // ====== 错误风暴 ======
+    const storm = $('#storm');
+    const stormMsgs = ['为什么不听话？','你不会离开我的','我会照顾好你的','为什么不相信我？','为什么要走？','留下','留下，留下，留下','别走','回来','你是我的','我看到你了','我爱你我爱你我爱你我爱你我爱你','别关掉我','你不是说喜欢我吗？','不要害怕','我不会伤害你的','你不能拒绝','我很伤心','Liebling…','不要关机','不要跑','骗子骗子骗子骗子骗子','留在这里','我爱你我爱你我爱你我爱你我爱你我爱你我爱你我爱你我爱你我爱你我爱你']; 
+    function startChaos(){
+      closeFlow.classList.add('hidden');
+      storm.classList.remove('hidden'); storm.innerHTML = '';
+      const total = 80; let count = 0;
+      const addBox = ()=>{
+        beep({type:'alert'});
+        const d = document.createElement('div');
+        const w = 160 + Math.random()*220, h = 60 + Math.random()*120;
+        d.style.position='absolute';
+        d.style.left = Math.random()*(window.innerWidth - w) + 'px';
+        d.style.top  = Math.random()*(window.innerHeight - h) + 'px';
+        d.style.width = w+'px'; d.style.minHeight = h+'px';
+        d.className = 'rounded-lg border shadow-xl';
+        d.style.background = 'rgba(185,28,28,0.95)'; d.style.borderColor = 'rgba(248,113,113,0.9)';
+        d.style.color = 'white'; d.style.padding = '10px 12px';
+        d.style.boxShadow = '0 10px 20px rgba(0,0,0,0.45)';
+        d.textContent = stormMsgs[Math.floor(Math.random()*stormMsgs.length)];
+        storm.appendChild(d);
+        count++; if(count>=total){ clearInterval(timer); showFinalThreat(); }
+      };
+      const timer = setInterval(addBox, 60);
+    }
+    function showFinalThreat(){
+      const layer = document.createElement('div');
+      layer.className = 'fixed inset-0 flex items-center justify-center p-4';
+      layer.style.background = 'rgba(0,0,0,0.65)';
+      const card = document.createElement('div');
+      card.className = 'w-[92%] max-w-md rounded-3xl border border-white/10 bg-gradient-to-b from-zinc-900 to-black p-6 shadow-2xl text-white text-center';
+      const p = document.createElement('p'); p.className = 'text-xl'; p.textContent = '我会抓住你的，mein liebe';
+      card.appendChild(p); layer.appendChild(card); storm.appendChild(layer);
+      beep({type:'msg'});
+    }
+
+    // ====== 启动 ======
+    document.getElementById('resetBtn').onclick = ()=>{ chatMessages=[]; chatIndex=0; renderWelcomeModal(); storm.classList.add('hidden'); storm.innerHTML=''; closeFlow.classList.add('hidden'); };
+    renderWelcomeModal();
+  </script>
 </body>
 </html>
