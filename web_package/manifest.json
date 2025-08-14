@@ -1,0 +1,10 @@
+
+{
+    "name": "Test Web App",
+    "short_name": "TestApp",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#000000",
+    "description": "A sample manifest file",
+    "icons": []
+}
